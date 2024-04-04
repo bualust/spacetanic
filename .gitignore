@@ -1,0 +1,4 @@
+.venv
+*.png
+input_feat/
+*ipynb*
