@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import pandas as pd
+import polars as pl
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -14,17 +14,17 @@ DO_FEATS_PLOT = False
 def main():
     """`main` function for spacetanic module"""
 
-    training_file = pd.read_csv("train.csv")
-    training_file = derived_variables(training_file)
-    training_file = remove_nan(training_file)
+    train_data = pl.read_csv("train.csv")
+    train_data = derived_variables(train_data)
+    feat_type_dict = columns_types(train_data)
+    train_data = remove_nan(train_data,feat_type_dict)
     if DO_FEATS_PLOT:
-        plot_variables(training_file, "before_enc")
-    training_file = encode_data(training_file)
+        plot_variables(train_data, feat_type_dict, "before_enc")
+    train_data = encode_data(train_data,feat_type_dict)
     if DO_FEATS_PLOT:
-        plot_variables(training_file, "after_enc")
-    training_file = training_file.drop("Name", axis=1)
-    data = training_file.astype("float64")
-    X_train, X_test, Y_train, Y_test = split_train_test(data)
+        plot_variables(train_data, feat_type_dict, "after_enc")
+    train_data = train_data.drop("Name")
+    X_train, X_test, Y_train, Y_test = split_train_test(train_data)
     run_XGBoost(X_train, X_test, Y_train, Y_test)
 
 
@@ -41,107 +41,122 @@ def run_XGBoost(X_train, X_test, Y_train, Y_test):
 def split_train_test(data):
     """Takes dataset and splits into training and test"""
 
-    Y = data["Transported"]
-    X = data.drop("Transported", axis=1)
+    #scikit-learn does not take polars DataFrame
+    Y = data["Transported"].to_numpy()
+    X = data.drop("Transported").to_numpy()
+
     X_train, X_test, Y_train, Y_test = train_test_split(
         X, Y, test_size=0.2, random_state=42
     )
+
     print("Number of test samples : ", X_test.shape[0])
     print("Number of train samples : ", X_train.shape[0])
     return X_train, X_test, Y_train, Y_test
 
 
-def encode_data(data):
+
+def columns_types(data):
+    """Takes the dataframe and checks the dtype of columns"""
+
+    enc_feats_string = []
+    enc_feats_bool = []
+    enc_feats_num = []
+    feat_type_dic = {}
+
+    dict_schema = data.schema
+    for col, col_type in dict_schema.items():
+        if isinstance(col_type, pl.String):
+            enc_feats_string.append(col)
+        elif isinstance(col_type, pl.Boolean):
+            enc_feats_bool.append(col)
+        else:
+            enc_feats_num.append(col)
+
+    feat_type_dic = {"num":enc_feats_num, 
+                     "string": enc_feats_string, 
+                     "bool":enc_feats_bool}
+
+    return feat_type_dic
+
+def encode_data(data,feat_type_dic):
     """encoding string features to have numerical value"""
 
-    no_encoded_feats = [
-        "Age",
-        "RoomService",
-        "FoodCourt",
-        "ShoppingMall",
-        "Spa",
-        "Number",
-        "Group",
-        "Single",
-        "VRDeck",
-        "Name",
-        "Transported",
-    ]
-
-    enc_feats = [str(item) for item in data.keys() if item not in no_encoded_feats]
-    data[enc_feats] = data[enc_feats].astype(str)
     enc = OrdinalEncoder()
-    data[enc_feats] = enc.fit_transform(data[enc_feats])
-    data[["Transported"]] = enc.fit_transform(data[["Transported"]])
+    data[feat_type_dic["string"]] = enc.fit_transform(data[feat_type_dic["string"]])
+    data[feat_type_dic["bool"]]   = enc.fit_transform(data[feat_type_dic["bool"]])
+
     return data
 
 
-def remove_nan(data):
+def remove_nan(data,feat_type_dict):
     """replacing NaN values with -99"""
-    df = data.copy()
-    df = df.fillna(-99)
-
-    return df
+    #data[feat_type_dict["num"]] = data.fill_nan(-99)
+    data = data.with_columns(
+        pl.col(feat_type_dict["num"])
+        .fill_nan(-99)
+    )
+    data = data.with_columns(
+        pl.col(feat_type_dict["num"])
+        .fill_null(-99)
+    )
+    data = data.with_columns(
+        pl.col(feat_type_dict["string"])
+        .fill_null("-99")
+    )
+    return data
 
 
 def derived_variables(data):
     """Takes Cabin and creates three variables
-    Decomposes PassangerId into two variables"""
+    Decomposes PassangerId into three variables"""
 
-    Deck = data["Cabin"].str.split("/").str.get(0)
-    Number = data["Cabin"].str.split("/").str.get(1)
-    Side = data["Cabin"].str.split("/").str.get(2)
-    data["Deck"], data["Number"], data["Side"] = (
-        Deck,
-        list(np.float_(Number)),
-        Side,
-    )
-    Group = data["PassengerId"].str.split("_").str.get(0)
-    Single = data["PassengerId"].str.split("_").str.get(1)
-    data["Group"], data["Single"] = (
-        list(np.float_(Group)),
-        list(np.float_(Single)),
-    )
+    data = data.with_columns(
+        [
+            pl.col("Cabin")
+            .str.split_exact("/", 2)
+            .struct.rename_fields(["Deck", "Number", "Side"])
+            .alias("fields"),
+        ]
+    ).unnest("fields")
 
-    data = data.drop("Cabin", axis=1)
-    data = data.drop("PassengerId", axis=1)
+    data = data.with_columns(
+        [
+            pl.col("PassengerId")
+            .str.split_exact("_", 1)
+            .struct.rename_fields(["Group", "Single"])
+            .alias("fields"),
+        ]
+    ).unnest("fields")
+
+    data = data.drop(["Cabin","PassengerId"])
+    
     return data
 
 
-def plot_variables(data, suffix):
+def plot_variables(data, feat_type_dict, suffix):
     """Takes every variable in the dataset
     and creates a plot comparing
     the case of true or false transported"""
 
-    num_feats = [
-        "Age",
-        "RoomService",
-        "FoodCourt",
-        "ShoppingMall",
-        "Spa",
-        "Number",
-        "Group",
-        "VRDeck",
-    ]
+    num_feats = feat_type_dict["num"]
 
     fig, ax = plt.subplots()
-    for keys in data.keys():
-        if keys == "Name":
+    for col in data.columns:
+        if col == "Name":
             continue
-        print(f"Plotting variable... {keys}")
-        if keys in num_feats:
+        print(f"Plotting variable... {col}")
+        if col in num_feats:
             binwidth = 2
-            if keys != "Age":
+            if col != "Age":
                 binwidth = 1000
-            if keys == "Number":
+            if col == "Number":
                 binwidth = 100
-            sns.histplot(data=data, x=keys, hue="Transported", binwidth=binwidth)
+            sns.histplot(data=data, x=col, hue="Transported", binwidth=binwidth)
         else:
             sns.countplot(
                 data=data,
-                x=keys,
-                hue="Transported",
-                order=data[keys].value_counts().index,
+                x=col,
+                hue="Transported"
             )
         plt.savefig(f"input_feat/{keys}_{suffix}.png")
         plt.cla()
