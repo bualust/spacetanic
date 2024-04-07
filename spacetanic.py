@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 import polars as pl
-import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 import os
@@ -12,16 +11,17 @@ from sklearn.metrics import accuracy_score
 
 DO_FEATS_PLOT = False
 
+
 def main():
     """`main` function for spacetanic module"""
 
     train_data = pl.read_csv("train.csv")
     train_data = derived_variables(train_data)
     feat_type_dict = columns_types(train_data)
-    train_data = remove_nan(train_data,feat_type_dict)
+    train_data = remove_nan(train_data, feat_type_dict)
     if DO_FEATS_PLOT:
         plot_variables(train_data, feat_type_dict, "before_enc")
-    train_data = encode_data(train_data,feat_type_dict)
+    train_data = encode_data(train_data, feat_type_dict)
     if DO_FEATS_PLOT:
         plot_variables(train_data, feat_type_dict, "after_enc")
     train_data = train_data.drop("Name")
@@ -42,7 +42,7 @@ def run_XGBoost(X_train, X_test, Y_train, Y_test):
 def split_train_test(data):
     """Takes dataset and splits into training and test"""
 
-    #scikit-learn does not take polars DataFrame
+    # scikit-learn does not take polars DataFrame
     Y = data["Transported"].to_numpy()
     X = data.drop("Transported").to_numpy()
 
@@ -53,7 +53,6 @@ def split_train_test(data):
     print("Number of test samples : ", X_test.shape[0])
     print("Number of train samples : ", X_train.shape[0])
     return X_train, X_test, Y_train, Y_test
-
 
 
 def columns_types(data):
@@ -73,37 +72,31 @@ def columns_types(data):
         else:
             enc_feats_num.append(col)
 
-    feat_type_dic = {"num":enc_feats_num, 
-                     "string": enc_feats_string, 
-                     "bool":enc_feats_bool}
+    feat_type_dic = {
+        "num": enc_feats_num,
+        "string": enc_feats_string,
+        "bool": enc_feats_bool,
+    }
 
     return feat_type_dic
 
-def encode_data(data,feat_type_dic):
+
+def encode_data(data, feat_type_dic):
     """encoding string features to have numerical value"""
 
     enc = OrdinalEncoder()
     data[feat_type_dic["string"]] = enc.fit_transform(data[feat_type_dic["string"]])
-    data[feat_type_dic["bool"]]   = enc.fit_transform(data[feat_type_dic["bool"]])
+    data[feat_type_dic["bool"]] = enc.fit_transform(data[feat_type_dic["bool"]])
 
     return data
 
 
-def remove_nan(data,feat_type_dict):
+def remove_nan(data, feat_type_dict):
     """replacing NaN values with -99"""
-    #data[feat_type_dict["num"]] = data.fill_nan(-99)
-    data = data.with_columns(
-        pl.col(feat_type_dict["num"])
-        .fill_nan(-99)
-    )
-    data = data.with_columns(
-        pl.col(feat_type_dict["num"])
-        .fill_null(-99)
-    )
-    data = data.with_columns(
-        pl.col(feat_type_dict["string"])
-        .fill_null("-99")
-    )
+    # data[feat_type_dict["num"]] = data.fill_nan(-99)
+    data = data.with_columns(pl.col(feat_type_dict["num"]).fill_nan(-99))
+    data = data.with_columns(pl.col(feat_type_dict["num"]).fill_null(-99))
+    data = data.with_columns(pl.col(feat_type_dict["string"]).fill_null("-99"))
     return data
 
 
@@ -129,8 +122,8 @@ def derived_variables(data):
         ]
     ).unnest("fields")
 
-    data = data.drop(["Cabin","PassengerId"])
-    
+    data = data.drop(["Cabin", "PassengerId"])
+
     return data
 
 
@@ -154,11 +147,7 @@ def plot_variables(data, feat_type_dict, suffix):
                 binwidth = 100
             sns.histplot(data=data, x=col, hue="Transported", binwidth=binwidth)
         else:
-            sns.countplot(
-                data=data,
-                x=col,
-                hue="Transported"
-            )
+            sns.countplot(data=data, x=col, hue="Transported")
         if not os.path.exists("input_feat"):
             os.makedirs("input_feat")
         if not os.path.exists(f"input_feat/{suffix}"):
