@@ -3,6 +3,7 @@ import polars as pl
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import os
 from sklearn.preprocessing import OrdinalEncoder
 from sklearn.model_selection import train_test_split
 from xgboost import XGBClassifier
@@ -158,7 +159,12 @@ def plot_variables(data, feat_type_dict, suffix):
                 x=col,
                 hue="Transported"
             )
-        plt.savefig(f"input_feat/{keys}_{suffix}.png")
+        if not os.path.exists("input_feat"):
+            os.makedirs("input_feat")
+        if not os.path.exists(f"input_feat/{suffix}"):
+            os.makedirs(f"input_feat/{suffix}")
+
+        plt.savefig(f"input_feat/{suffix}/{col}.png")
         plt.cla()
 
 
