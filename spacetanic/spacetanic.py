@@ -24,7 +24,7 @@ def main():
 
 def data_manipulation(filename):
     """takes input data, adds derived variables,
-       removes nan and encodes non-numerical columns"""
+    removes nan and encodes non-numerical columns"""
 
     data = pl.read_csv(filename)
     data = derived_variables(data)
@@ -37,6 +37,7 @@ def data_manipulation(filename):
         plot_variables(data, feat_type_dict, "after_enc")
 
     return data
+
 
 def run_XGBoost(X_train, X_test, Y_train, Y_test):
     """defines XGBoost classifier and runs prediction"""
